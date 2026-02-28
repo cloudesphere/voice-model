@@ -23,7 +23,16 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from typing import Any, Dict, List, Optional
+
+# Default scorer commands when env vars are not set (use same Python as engine)
+_DEFAULT_WORD_SCORE_CMD = (
+    f'"{sys.executable}" -m src.scoring.word_scorer_cli --user_wav {{user_wav}} --segment_id {{segment_id}} --out {{out}}'
+)
+_DEFAULT_MAKHARIJ_CMD = (
+    f'"{sys.executable}" -m src.scoring.makharij_cli --word_score {{word_score}} --out {{out}}'
+)
 
 # Project paths (override with env TAJWEED_ARTIFACTS_DIR for VPS/deploy)
 ARTIFACTS_DIR = os.path.abspath(
@@ -175,6 +184,11 @@ def qc_word_score(ws: Dict[str, Any]) -> None:
 # ----------------------------
 # Command runner + ensure_scores
 # ----------------------------
+def _norm_path(p: str) -> str:
+    """Use forward slashes so shlex.split() does not treat backslashes as escapes (Windows)."""
+    return (p or "").replace("\\", "/")
+
+
 def _format_cmd(
     tpl: str,
     *,
@@ -184,13 +198,17 @@ def _format_cmd(
     word_score: str = "",
 ) -> List[str]:
     cmd = (tpl or "").format(
-        user_wav=user_wav,
+        user_wav=_norm_path(user_wav),
         segment_id=segment_id,
-        out=out,
-        word_score=word_score,
+        out=_norm_path(out),
+        word_score=_norm_path(word_score),
     ).strip()
     _assert(cmd, "command template is empty")
     return shlex.split(cmd)
+
+
+# Max time for word scorer (Whisper load + transcribe can be slow)
+_SCORER_TIMEOUT_SEC = 600
 
 
 def _run_cmd(
@@ -202,15 +220,12 @@ def _run_cmd(
     word_score: str = "",
 ) -> None:
     cmd = _format_cmd(tpl, user_wav=user_wav, segment_id=segment_id, out=out, word_score=word_score)
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    # Do not capture stdout/stderr: scorer can run long (Whisper) and pipe buffer can deadlock
+    r = subprocess.run(cmd, timeout=_SCORER_TIMEOUT_SEC)
     if r.returncode != 0:
         raise RuntimeError(
-            "Command failed:\n"
-            + " ".join(cmd)
-            + "\n\nSTDOUT:\n"
-            + (r.stdout or "")
-            + "\n\nSTDERR:\n"
-            + (r.stderr or "")
+            "Command failed (exit code %s). See output above.\nCommand: %s"
+            % (r.returncode, " ".join(cmd))
         )
 
 
@@ -237,16 +252,14 @@ def ensure_scores(user_wav: str, segment_id: str, force: bool = False) -> Dict[s
     cached: List[str] = []
 
     if force or (not os.path.exists(ws_p)):
-        tpl = os.environ.get("WORD_SCORE_CMD", "").strip()
-        _assert(tpl, "WORD_SCORE_CMD not set")
+        tpl = (os.environ.get("WORD_SCORE_CMD") or _DEFAULT_WORD_SCORE_CMD).strip()
         _run_cmd(tpl, user_wav=user_wav, segment_id=segment_id, out=ws_p)
         generated.append("word_score")
     else:
         cached.append("word_score")
 
     if force or (not os.path.exists(mk_p)):
-        tpl = os.environ.get("MAKHARIJ_CMD", "").strip()
-        _assert(tpl, "MAKHARIJ_CMD not set")
+        tpl = (os.environ.get("MAKHARIJ_CMD") or _DEFAULT_MAKHARIJ_CMD).strip()
         _run_cmd(tpl, user_wav=user_wav, segment_id=segment_id, out=mk_p, word_score=ws_p)
         generated.append("makharij_flags")
     else:
@@ -406,6 +419,13 @@ def score_audio(user_wav_path: str, segment_id: str, force: bool = False) -> Dic
 
     # Alignment QC (reference must exist)
     aln_p = alignment_path(segment_id)
+    if not os.path.exists(aln_p):
+        _assert(
+            False,
+            f"alignment not found: {aln_p}\n"
+            "Create artifacts/alignments/ and add a reference alignment JSON for this segment, or set\n"
+            "--artifacts-dir (or TAJWEED_ARTIFACTS_DIR) to a directory that contains alignments/.",
+        )
     aln = _load_json(aln_p, "alignment")
     _assert(isinstance(aln, dict), "alignment must be a JSON object")
     qc_alignment(aln)
