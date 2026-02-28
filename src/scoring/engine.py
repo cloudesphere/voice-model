@@ -86,6 +86,32 @@ def alignment_path(segment_id: str) -> str:
     return os.path.join(ALIGNMENTS_DIR, f"{segment_id}.alignment.json")
 
 
+def _artifacts_dir_candidates() -> list:
+    """Candidate artifact root dirs: default, then sibling voice-model/artifacts (for VPS voice-model-code layout)."""
+    cwd = os.getcwd()
+    candidates = [ARTIFACTS_DIR]
+    sibling = os.path.abspath(os.path.join(cwd, "..", "voice-model", "artifacts"))
+    if sibling != ARTIFACTS_DIR and sibling not in candidates:
+        candidates.append(sibling)
+    return candidates
+
+
+def _resolve_artifacts_dir(segment_id: str) -> str:
+    """Return the first artifacts dir that contains the segment alignment file. Updates globals and env when falling back."""
+    global ARTIFACTS_DIR, ALIGNMENTS_DIR, SCORES_DIR, EXERCISE_INDEX_PATH
+    for base in _artifacts_dir_candidates():
+        aln_p = os.path.join(base, "alignments", f"{segment_id}.alignment.json")
+        if os.path.exists(aln_p):
+            if base != ARTIFACTS_DIR:
+                os.environ["TAJWEED_ARTIFACTS_DIR"] = base
+                ARTIFACTS_DIR = base
+                ALIGNMENTS_DIR = os.path.join(ARTIFACTS_DIR, "alignments")
+                SCORES_DIR = os.path.join(ARTIFACTS_DIR, "scores")
+                EXERCISE_INDEX_PATH = os.path.join(ARTIFACTS_DIR, "exercise_index.json")
+            return base
+    return ARTIFACTS_DIR  # no change, will fail in _load_json with clear error
+
+
 def score_path(segment_id: str, kind: str) -> str:
     # kind: word_score | makharij_flags | dtw_evidence
     return os.path.join(SCORES_DIR, f"{segment_id}.{kind}.json")
@@ -372,6 +398,9 @@ def score_audio(user_wav_path: str, segment_id: str) -> Dict[str, Any]:
         f"user wav not found: {user_wav_path} (check the file exists, e.g. ls -la {user_wav_path!r})",
     )
     _assert(segment_id and isinstance(segment_id, str), "segment_id required")
+
+    # Resolve artifacts dir (default or fallback e.g. ../voice-model/artifacts when run from voice-model-code)
+    _resolve_artifacts_dir(segment_id)
 
     # Alignment QC (reference must exist)
     aln_p = alignment_path(segment_id)
