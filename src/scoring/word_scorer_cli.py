@@ -1,6 +1,9 @@
 from __future__ import annotations
 import argparse, json, os, re
-from typing import List, Dict, Any
+from typing import Callable, List, Dict, Any
+
+from src.scoring.token_reconcile import choose_best_hyp_variant
+
 
 def normalize_ar(s: str) -> str:
     import re
@@ -204,7 +207,10 @@ def trim_ref_to_hyp(ref: list[str], hyp: list[str], min_anchor_hits: int = 1, mi
     meta["trim_applied"] = False
     return ref, meta
 
-def levenshtein_ops(ref: List[str], hyp: List[str]) -> Dict[str, Any]:
+def levenshtein_ops(ref: List[str], hyp: List[str], eq_pred: Callable[[str, str], bool] | None = None) -> Dict[str, Any]:
+    # Safety: default to exact match; coerce tokens to str to avoid None from upstream
+    if eq_pred is None:
+        eq_pred = lambda a, b: a == b
     # DP alignment producing ops (MVP)
     n, m = len(ref), len(hyp)
     dp = [[0]*(m+1) for _ in range(n+1)]
@@ -215,7 +221,11 @@ def levenshtein_ops(ref: List[str], hyp: List[str]) -> Dict[str, Any]:
         dp[0][j] = j; bt[0][j] = ("INS", None, j-1)
     for i in range(1, n+1):
         for j in range(1, m+1):
-            cost_sub = 0 if ref[i-1] == hyp[j-1] else 1
+            ref_tok = ref[i - 1]
+            hyp_tok = hyp[j - 1]
+            ref_tok = "" if ref_tok is None else str(ref_tok)
+            hyp_tok = "" if hyp_tok is None else str(hyp_tok)
+            cost_sub = 0 if eq_pred(ref_tok, hyp_tok) else 1
             cand = [
                 (dp[i-1][j] + 1, ("DEL", i-1, None)),
                 (dp[i][j-1] + 1, ("INS", None, j-1)),
@@ -254,6 +264,7 @@ def levenshtein_ops(ref: List[str], hyp: List[str]) -> Dict[str, Any]:
         wer = 1.0
     return {"wer": round(wer, 4), "matches": matches, "subs": subs, "dels": dels, "ins": ins, "ops": ops}
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--user_wav", required=True)
@@ -270,8 +281,21 @@ def main():
     hyp_norm = normalize_ar(hyp_text).split()
 
     ref_used, partial_meta = trim_ref_to_hyp(ref_norm, hyp_norm, min_matches=3)
-    out = levenshtein_ops(ref_used, hyp_norm)
-    out["meta"] = partial_meta
+
+    def _align_wrapper(ref_toks: List[str], hyp_toks: List[str], eq_pred: Callable[[str, str], bool]) -> Dict[str, Any]:
+        return levenshtein_ops(ref_toks, hyp_toks, eq_pred=eq_pred)
+
+    hyp_best, align_res, variant_meta = choose_best_hyp_variant(
+        ref_used,
+        hyp_norm,
+        align_fn=_align_wrapper,
+    )
+    out = align_res
+    # Retain existing meta (partial_mode, skipped_ref_prefix, etc.) and add hyp_variant
+    out.setdefault("meta", {})
+    out["meta"].update(partial_meta)
+    out["meta"]["hyp_variant"] = variant_meta
+
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     json.dump(out, open(args.out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
