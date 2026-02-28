@@ -214,7 +214,7 @@ def _run_cmd(
         )
 
 
-def ensure_scores(user_wav: str, segment_id: str) -> Dict[str, List[str]]:
+def ensure_scores(user_wav: str, segment_id: str, force: bool = False) -> Dict[str, List[str]]:
     """
     Ensure required scorer outputs exist under artifacts/scores.
 
@@ -224,6 +224,8 @@ def ensure_scores(user_wav: str, segment_id: str) -> Dict[str, List[str]]:
 
     Optional:
       - dtw_evidence.json via DTW_CMD
+
+    When force=True, regenerate all outputs (ignore cached artifacts).
     """
     os.makedirs(SCORES_DIR, exist_ok=True)
 
@@ -234,7 +236,7 @@ def ensure_scores(user_wav: str, segment_id: str) -> Dict[str, List[str]]:
     generated: List[str] = []
     cached: List[str] = []
 
-    if not os.path.exists(ws_p):
+    if force or (not os.path.exists(ws_p)):
         tpl = os.environ.get("WORD_SCORE_CMD", "").strip()
         _assert(tpl, "WORD_SCORE_CMD not set")
         _run_cmd(tpl, user_wav=user_wav, segment_id=segment_id, out=ws_p)
@@ -242,7 +244,7 @@ def ensure_scores(user_wav: str, segment_id: str) -> Dict[str, List[str]]:
     else:
         cached.append("word_score")
 
-    if not os.path.exists(mk_p):
+    if force or (not os.path.exists(mk_p)):
         tpl = os.environ.get("MAKHARIJ_CMD", "").strip()
         _assert(tpl, "MAKHARIJ_CMD not set")
         _run_cmd(tpl, user_wav=user_wav, segment_id=segment_id, out=mk_p, word_score=ws_p)
@@ -252,7 +254,7 @@ def ensure_scores(user_wav: str, segment_id: str) -> Dict[str, List[str]]:
 
     tpl = os.environ.get("DTW_CMD", "").strip()
     if tpl:
-        if not os.path.exists(dtw_p):
+        if force or (not os.path.exists(dtw_p)):
             _run_cmd(tpl, user_wav=user_wav, segment_id=segment_id, out=dtw_p)
             generated.append("dtw_evidence")
         else:
@@ -391,7 +393,7 @@ def recommend_exercises(makharij_flags: List[Dict[str, Any]], top_k: int = DEFAU
 # ----------------------------
 # Main API
 # ----------------------------
-def score_audio(user_wav_path: str, segment_id: str) -> Dict[str, Any]:
+def score_audio(user_wav_path: str, segment_id: str, force: bool = False) -> Dict[str, Any]:
     user_wav_path = os.path.abspath(os.path.expanduser(user_wav_path))
     _assert(
         os.path.exists(user_wav_path),
@@ -409,7 +411,7 @@ def score_audio(user_wav_path: str, segment_id: str) -> Dict[str, Any]:
     qc_alignment(aln)
 
     # Ensure scorer outputs exist
-    score_sources = ensure_scores(user_wav_path, segment_id)
+    score_sources = ensure_scores(user_wav_path, segment_id, force=force)
 
     # Load required outputs
     word_p = score_path(segment_id, "word_score")
@@ -474,6 +476,7 @@ def _main() -> None:
         default=None,
         help="Path to artifacts dir (alignments, scores). Overrides TAJWEED_ARTIFACTS_DIR. Example: /root/voice-model/artifacts",
     )
+    ap.add_argument("--force", action="store_true", help="Force re-run scorers (ignore cached artifacts)")
     ap.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     ap.add_argument("--out", default=None, help="Optional output JSON path")
     args = ap.parse_args()
@@ -486,7 +489,7 @@ def _main() -> None:
         SCORES_DIR = os.path.join(ARTIFACTS_DIR, "scores")
         EXERCISE_INDEX_PATH = os.path.join(ARTIFACTS_DIR, "exercise_index.json")
 
-    result = score_audio(args.user_wav, args.segment_id)
+    result = score_audio(args.user_wav, args.segment_id, force=args.force)
     if args.out:
         _dump_json(args.out, result)
 
