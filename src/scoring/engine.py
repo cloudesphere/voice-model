@@ -363,7 +363,11 @@ def recommend_exercises(makharij_flags: List[Dict[str, Any]], top_k: int = DEFAU
 # Main API
 # ----------------------------
 def score_audio(user_wav_path: str, segment_id: str) -> Dict[str, Any]:
-    _assert(os.path.exists(user_wav_path), f"user wav not found: {user_wav_path}")
+    user_wav_path = os.path.abspath(os.path.expanduser(user_wav_path))
+    _assert(
+        os.path.exists(user_wav_path),
+        f"user wav not found: {user_wav_path} (check the file exists, e.g. ls -la {user_wav_path!r})",
+    )
     _assert(segment_id and isinstance(segment_id, str), "segment_id required")
 
     # Alignment QC (reference must exist)
