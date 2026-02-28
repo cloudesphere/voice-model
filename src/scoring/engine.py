@@ -436,12 +436,26 @@ def score_audio(user_wav_path: str, segment_id: str) -> Dict[str, Any]:
 # CLI
 # ----------------------------
 def _main() -> None:
+    global ARTIFACTS_DIR, ALIGNMENTS_DIR, SCORES_DIR, EXERCISE_INDEX_PATH
     ap = argparse.ArgumentParser(description="Unified Tajweed Scoring Engine (MVP)")
     ap.add_argument("--user_wav", required=True, help="User WAV path (16kHz mono PCM recommended)")
     ap.add_argument("--segment_id", required=True, help="Segment id (e.g., seg_full_0001)")
+    ap.add_argument(
+        "--artifacts-dir",
+        default=None,
+        help="Path to artifacts dir (alignments, scores). Overrides TAJWEED_ARTIFACTS_DIR. Example: /root/voice-model/artifacts",
+    )
     ap.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     ap.add_argument("--out", default=None, help="Optional output JSON path")
     args = ap.parse_args()
+
+    if args.artifacts_dir:
+        args.artifacts_dir = os.path.abspath(os.path.expanduser(args.artifacts_dir))
+        os.environ["TAJWEED_ARTIFACTS_DIR"] = args.artifacts_dir
+        ARTIFACTS_DIR = args.artifacts_dir
+        ALIGNMENTS_DIR = os.path.join(ARTIFACTS_DIR, "alignments")
+        SCORES_DIR = os.path.join(ARTIFACTS_DIR, "scores")
+        EXERCISE_INDEX_PATH = os.path.join(ARTIFACTS_DIR, "exercise_index.json")
 
     result = score_audio(args.user_wav, args.segment_id)
     if args.out:
