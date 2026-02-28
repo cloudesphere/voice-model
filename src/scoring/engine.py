@@ -11,6 +11,7 @@
 #   export WORD_SCORE_CMD='python3 -m src.scoring.word_scorer_cli --user_wav {user_wav} --segment_id {segment_id} --out {out}'
 #   export MAKHARIJ_CMD='python3 -m src.scoring.makharij_cli --word_score {word_score} --out {out}'
 #   export DTW_CMD='python3 -m src.scoring.dtw_cli --segment_id {segment_id} --out {out}'   # optional
+#   export TAJWEED_ARTIFACTS_DIR=/path/to/artifacts   # optional; default "artifacts" (relative to cwd)
 #
 # Usage:
 #   python3 -m src.scoring.engine --user_wav <wav> --segment_id seg_full_0001 --pretty
@@ -24,8 +25,10 @@ import shlex
 import subprocess
 from typing import Any, Dict, List, Optional
 
-# Project paths
-ARTIFACTS_DIR = "artifacts"
+# Project paths (override with env TAJWEED_ARTIFACTS_DIR for VPS/deploy)
+ARTIFACTS_DIR = os.path.abspath(
+    os.path.expanduser(os.environ.get("TAJWEED_ARTIFACTS_DIR", "artifacts"))
+)
 ALIGNMENTS_DIR = os.path.join(ARTIFACTS_DIR, "alignments")
 SCORES_DIR = os.path.join(ARTIFACTS_DIR, "scores")
 

@@ -272,7 +272,10 @@ def main():
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
-    aln_path = os.path.join("artifacts", "alignments", f"{args.segment_id}.alignment.json")
+    artifacts_dir = os.path.abspath(
+        os.path.expanduser(os.environ.get("TAJWEED_ARTIFACTS_DIR", "artifacts"))
+    )
+    aln_path = os.path.join(artifacts_dir, "alignments", f"{args.segment_id}.alignment.json")
     ref_words = load_ref_words(aln_path)
     ref_norm = normalize_ar(" ".join(ref_words)).split()
 
